@@ -116,3 +116,83 @@ static double simular_secuencial(Mundo *w, int stop_on_collision, long *puntaje_
     return t1 - t0;
 }
 
+/* Simulacion paralela con OpenMP */
+static double simular_paralela(Mundo *w, int threads, int stop_on_collision, long *puntaje_out, int *frame_final_out, int *colision_out) {
+    int N = w->N, M = w->M;
+    double jugador_y = 0.0;
+    int en_salto = 0, frame_salto = 0;
+    long puntaje = 0;
+    int colision = 0;
+    int frame_final = N;
+    double checksum = 0.0;
+
+    omp_set_num_threads(threads);
+    omp_set_max_active_levels(2);
+
+    double t0 = omp_get_wtime();
+
+    for (int frame = 0; frame < N; frame++) {
+        if (colision && stop_on_collision) { frame_final = frame; break; }
+
+        #pragma omp parallel sections num_threads(3) shared(w, jugador_y, en_salto, frame_salto, checksum)
+        {
+            #pragma omp section
+            {
+                #pragma omp parallel for num_threads(threads) schedule(static)
+                for (int i = 0; i < M; i++) {
+                    w->pos_x[i] += w->vel[i];
+                    if (w->pos_x[i] < 0.0) {
+                        w->recycle_count[i]++;
+                        w->pos_x[i] = 800.0 + (double)((i * 131u + w->recycle_count[i] * 977u) % RECICLO_MOD);
+                    }
+                }
+            }
+
+            #pragma omp section
+            {
+                if (en_salto) {
+                    frame_salto++;
+                    jugador_y = SALTO_ALTURA_MAX * sin(M_PI * frame_salto / (double)SALTO_DURACION);
+                    if (frame_salto >= SALTO_DURACION) { jugador_y = 0.0; en_salto = 0; }
+                } else if (toca_saltar(frame)) {
+                    en_salto = 1; frame_salto = 0;
+                }
+            }
+
+            #pragma omp section
+            {
+                double local_checksum = 0.0;
+                for (int i = 0; i < M; i++) local_checksum += w->prev_pos_x[i];
+                checksum = local_checksum;
+            }
+        }
+
+        int col_f = 0;
+        long pts_f = 0;
+        #pragma omp parallel for num_threads(threads) reduction(||:col_f) reduction(+:pts_f) schedule(static)
+        for (int i = 0; i < M; i++) {
+            double dx = fabs(JUGADOR_X - w->pos_x[i]);
+            double umbral = JUGADOR_X - w->ancho_obs[i];
+            if (dx < w->ancho_obs[i] && jugador_y <= w->altura_obs[i]) {
+                col_f = 1;
+            }
+            if (w->pos_x[i] < umbral && (w->pos_x[i] - w->vel[i]) >= umbral) {
+                pts_f += 10;
+            }
+        }
+        colision = col_f;
+        puntaje += pts_f;
+
+        memcpy(w->prev_pos_x, w->pos_x, sizeof(double) * M);
+
+        frame_final = frame + 1;
+    }
+
+    double t1 = omp_get_wtime();
+    (void)checksum;
+    *puntaje_out = puntaje;
+    *frame_final_out = frame_final;
+    *colision_out = colision;
+    return t1 - t0;
+}
+
