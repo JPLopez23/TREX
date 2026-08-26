@@ -196,3 +196,41 @@ static double simular_paralela(Mundo *w, int threads, int stop_on_collision, lon
     return t1 - t0;
 }
 
+/* Punto de entrada: parsea argumentos y corre el modo elegido */
+int main(int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Uso:\n  %s seq <N> <M> [seed]\n  %s par <N> <M> <threads> [seed]\n", argv[0], argv[0]);
+        return 1;
+    }
+
+    const char *modo = argv[1];
+    int N = atoi(argv[2]);
+    int M = atoi(argv[3]);
+
+    Mundo w;
+    long puntaje; int frame_final; int colision;
+    double t;
+
+    if (strcmp(modo, "seq") == 0) {
+        unsigned seed = (argc > 4) ? (unsigned)atoi(argv[4]) : 12345u;
+        int stop_on_collision = (argc > 5) ? atoi(argv[5]) : 1;
+        inicializar_mundo(&w, N, M, seed);
+        t = simular_secuencial(&w, stop_on_collision, &puntaje, &frame_final, &colision);
+        printf("seq,1,%d,%d,%.6f,%ld,%d,%d\n", N, M, t, puntaje, frame_final, colision);
+        liberar_mundo(&w);
+    } else if (strcmp(modo, "par") == 0) {
+        if (argc < 5) { fprintf(stderr, "Falta <threads>\n"); return 1; }
+        int threads = atoi(argv[4]);
+        unsigned seed = (argc > 5) ? (unsigned)atoi(argv[5]) : 12345u;
+        int stop_on_collision = (argc > 6) ? atoi(argv[6]) : 1;
+        inicializar_mundo(&w, N, M, seed);
+        t = simular_paralela(&w, threads, stop_on_collision, &puntaje, &frame_final, &colision);
+        printf("par,%d,%d,%d,%.6f,%ld,%d,%d\n", threads, N, M, t, puntaje, frame_final, colision);
+        liberar_mundo(&w);
+    } else {
+        fprintf(stderr, "Modo desconocido: %s (usa 'seq' o 'par')\n", modo);
+        return 1;
+    }
+
+    return 0;
+}
